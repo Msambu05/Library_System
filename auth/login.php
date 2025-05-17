@@ -1,54 +1,85 @@
 <?php
 session_start();
-include '../db/connection.php'; // Adjust path if needed
+require '../config/connection.php';
 
-$message = "";
+// Initialize variables
+$message = '';
+$username = '';
+$login_blocked = false;
 
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login'])) {
+// Check for brute force attempts
+if (isset($_SESSION['login_attempts']) {
+    if ($_SESSION['login_attempts'] >= 5) {
+        $login_blocked = true;
+        $remaining_time = (60 * 5) - (time() - $_SESSION['last_attempt_time']);
+        if ($remaining_time <= 0) {
+            unset($_SESSION['login_attempts']);
+            $login_blocked = false;
+        } else {
+            $message = "Too many failed attempts. Please try again in " . ceil($remaining_time/60) . " minutes.";
+        }
+    }
+}
+
+// Process login form
+if (!$login_blocked && $_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login'])) {
     $username = trim($_POST["username"]);
     $password = trim($_POST["password"]);
 
     if (empty($username) || empty($password)) {
-        $message = "Please fill in all fields.";
+        $message = "Please enter both username and password.";
     } else {
-        // Case-insensitive comparison for username
-        $stmt = $conn->prepare("SELECT * FROM Register WHERE LOWER(Username) = LOWER(?)");
-        $stmt->bind_param("s", $username);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        try {
+            // Get user from database
+            $stmt = $conn->prepare("SELECT * FROM Users WHERE Username = ? OR Email = ? LIMIT 1");
+            $stmt->execute([$username, $username]);
+            $user = $stmt->fetch();
 
-        if ($result && $result->num_rows > 0) {
-            $row = $result->fetch_assoc();
+            if ($user) {
+                // Verify password
+                if (password_verify($password, $user['PasswordHash'])) {
+                    // Regenerate session ID to prevent fixation
+                    session_regenerate_id(true);
+                    
+                    // Store user in session
+                    $_SESSION['user_id'] = $user['UserID'];
+                    $_SESSION['username'] = $user['Username'];
+                    $_SESSION['role'] = $user['Role'];
+                    $_SESSION['full_name'] = $user['FullName'];
+                    $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'];
+                    $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'];
+                    $_SESSION['last_login'] = time();
 
-            // Check password using password_verify()
-            if (password_verify($password, $row["Password"])) {
-                $_SESSION["RegID"] = $row["RegID"];
-                $_SESSION["UserID"] = $row["RegID"];
-                $_SESSION["Username"] = $row["Username"]; // Uppercase 'U' to match dashboard
-                $_SESSION["Role"] = $row["Role"];
-                $_SESSION["FullName"] = $row["FullName"];
+                    // Update last login time
+                    $update_stmt = $conn->prepare("UPDATE Users SET LastLogin = NOW() WHERE UserID = ?");
+                    $update_stmt->execute([$user['UserID']]);
 
-                // Redirect based on role
-                if (strtolower($row["Role"]) === "member") {
-                    header("Location: member_dashboard.php");
-                    exit();
-                } elseif (strtolower($row["Role"]) === "librarian") {
-                    header("Location: admindashboard.php");
+                    // Reset login attempts
+                    unset($_SESSION['login_attempts']);
+
+                    // Redirect based on role
+                    if ($user['Role'] === 'Librarian') {
+                        header("Location: ../admin/index.php");
+                    } else {
+                        header("Location: ../member/index.php");
+                    }
                     exit();
                 } else {
-                    $message = "Invalid role detected.";
+                    // Increment failed attempts
+                    $_SESSION['login_attempts'] = ($_SESSION['login_attempts'] ?? 0) + 1;
+                    $_SESSION['last_attempt_time'] = time();
+                    $message = "Invalid username or password.";
                 }
             } else {
-                $message = "Incorrect password.";
+                $_SESSION['login_attempts'] = ($_SESSION['login_attempts'] ?? 0) + 1;
+                $_SESSION['last_attempt_time'] = time();
+                $message = "Invalid username or password.";
             }
-        } else {
-            $message = "Invalid username.";
+        } catch (PDOException $e) {
+            error_log("Login error: " . $e->getMessage());
+            $message = "System error. Please try again later.";
         }
-
-        $stmt->close();
     }
-
-    $conn->close();
 }
 ?>
 
@@ -56,87 +87,176 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library System - Login</title>
     <style>
         body {
-            font-family: Arial;
-            background: #f5f5f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
             height: 100vh;
         }
-        .login-box {
-            width: 400px;
-            background: white;
-            padding: 25px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        
+        .login-container {
+            background-color: white;
             border-radius: 8px;
-        }
-        .login-box h2 {
-            text-align: center;
-        }
-        .form-group {
-            margin: 15px 0;
-        }
-        label {
-            font-weight: bold;
-        }
-        input, select {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             width: 100%;
-            padding: 10px;
-            margin-top: 5px;
+            max-width: 400px;
+            padding: 2rem;
         }
-        .btn {
-            background: #007bff;
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .login-header h1 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+        
+        .login-header p {
+            color: #7f8c8d;
+            margin: 0;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #3498db;
             color: white;
             border: none;
-            padding: 10px;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 500;
             cursor: pointer;
-            width: 100%;
-            font-size: 16px;
+            transition: background-color 0.2s;
         }
+        
+        .btn-login:hover {
+            background-color: #2980b9;
+        }
+        
+        .btn-login:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
         .message {
-            color: red;
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 4px;
         }
-        .register {
+        
+        .error {
+            background-color: #fdecea;
+            color: #c62828;
+        }
+        
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .login-footer {
             text-align: center;
-            margin-top: 10px;
+            margin-top: 1.5rem;
+            color: #7f8c8d;
+        }
+        
+        .login-footer a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .login-footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .password-toggle {
+            display: flex;
+            align-items: center;
+            margin-top: 0.5rem;
+        }
+        
+        .password-toggle input[type="checkbox"] {
+            width: auto;
+            margin-right: 0.5rem;
         }
     </style>
-    <script>
-        function togglePassword() {
-            const pass = document.getElementById("password");
-            pass.type = pass.type === "password" ? "text" : "password";
-        }
-    </script>
 </head>
 <body>
-
-<div class="login-box">
-    <h2>Login</h2>
-    <?php if (!empty($message)) echo "<p class='message'>$message</p>"; ?>
-    <form method="post">
-        <div class="form-group">
-            <label>Username (Email/Phone)</label>
-            <input type="text" name="username" required>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Library System</h1>
+            <p>Please login to continue</p>
         </div>
-
-        <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="password" name="password" required>
-            <input type="checkbox" onclick="togglePassword()"> Show Password
+        
+        <?php if (!empty($message)): ?>
+            <div class="message error"><?php echo htmlspecialchars($message); ?></div>
+        <?php endif; ?>
+        
+        <form method="post" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+            <div class="form-group">
+                <label for="username">Username or Email</label>
+                <input type="text" id="username" name="username" value="<?php echo htmlspecialchars($username); ?>" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+                <div class="password-toggle">
+                    <input type="checkbox" id="showPassword" onclick="togglePassword()">
+                    <label for="showPassword">Show password</label>
+                </div>
+            </div>
+            
+            <button type="submit" name="login" class="btn-login" <?php echo $login_blocked ? 'disabled' : ''; ?>>Login</button>
+        </form>
+        
+        <div class="login-footer">
+            <a href="reset_password.php">Forgot password?</a> | 
+            <a href="register.php">Create an account</a>
         </div>
-
-        <input type="submit" name="login" value="Login" class="btn">
-    </form>
-
-    <div class="register">
-        <a href="register.php">Don't have an account? Register</a>
     </div>
-</div>
 
+    <script>
+        function togglePassword() {
+            const passwordField = document.getElementById('password');
+            const showPassword = document.getElementById('showPassword');
+            passwordField.type = showPassword.checked ? 'text' : 'password';
+        }
+    </script>
 </body>
 </html>
