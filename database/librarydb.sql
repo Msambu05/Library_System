@@ -7,7 +7,7 @@ USE librarydb;
 -- TABLES FOR USER MANAGEMENT
 -- =============================================
 
--- Users Table (with registration fields)
+-- Users Table (main user storage)
 CREATE TABLE Users (
     UserID INT AUTO_INCREMENT PRIMARY KEY,
     Username VARCHAR(50) UNIQUE NOT NULL,
@@ -21,9 +21,23 @@ CREATE TABLE Users (
     IsActive BOOLEAN DEFAULT TRUE,
     RegistrationDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     LastLogin TIMESTAMP NULL,
+    ResetToken VARCHAR(255) NULL,
+    ResetTokenExpiry TIMESTAMP NULL,
     INDEX idx_role (Role),
     INDEX idx_email (Email),
     INDEX idx_active (IsActive)
+) ENGINE=InnoDB;
+
+-- Password Reset Tokens (separate table for security)
+CREATE TABLE PasswordResets (
+    ResetID INT AUTO_INCREMENT PRIMARY KEY,
+    UserID INT NOT NULL,
+    Token VARCHAR(255) NOT NULL,
+    Expiry TIMESTAMP NOT NULL,
+    Used BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE,
+    INDEX idx_token (Token),
+    INDEX idx_expiry (Expiry)
 ) ENGINE=InnoDB;
 
 -- RegistrationRequests Table (for approval workflow)
@@ -252,3 +266,4 @@ FROM Borrowing b
 JOIN Users u ON b.UserID = u.UserID
 JOIN Books bk ON b.BookID = bk.BookID
 WHERE b.Status = 'Active' AND b.DueDate < CURRENT_DATE;
+
