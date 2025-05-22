@@ -390,7 +390,7 @@ $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
                 return;
             }
             
-            if (isNaN(currentAvailable) {
+            if (isNaN(currentAvailable)) {
                 available.value = total;
             } else if (currentAvailable > total) {
                 available.value = total;
